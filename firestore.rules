@@ -1,0 +1,77 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: projects
+// Document ID: {projectId}
+// Fields:
+//   - name: string (required) - Project name
+//   - description: string (optional) - Project description
+//   - ownerId: string (required) - UID of the owner
+//   - createdAt: timestamp (required) - Creation time
+//   - updatedAt: timestamp (required) - Last update time
+//   - plans: list (required) - Array of story plan objects
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() &&
+        (request.auth.token.email == "victor.jardel.design@gmail.com" && request.auth.token.email_verified == true);
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.ownerId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function isValidProject(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             (!('description' in data) || (data.description is string && data.description.size() < 500)) &&
+             data.ownerId is string &&
+             data.plans is list &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    match /projects/{projectId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidProject(request.resource.data) && request.resource.data.ownerId == request.auth.uid;
+      allow update: if (isDocOwner() || isAdmin()) && 
+                      isValidProject(request.resource.data) && 
+                      request.resource.data.ownerId == resource.data.ownerId;
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    function isValidComment(data) {
+      return data.projectId is string &&
+             data.planId is number &&
+             data.text is string && data.text.size() > 0 && data.text.size() < 1000 &&
+             data.authorName is string && data.authorName.size() < 100 &&
+             data.createdAt is timestamp;
+    }
+
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if isValidComment(request.resource.data);
+      allow delete: if isAdmin() || 
+                      (isAuthenticated() && request.auth.uid == resource.data.uid) ||
+                      (isAuthenticated() && get(/databases/$(database)/documents/projects/$(resource.data.projectId)).data.ownerId == request.auth.uid);
+    }
+  }
+}
